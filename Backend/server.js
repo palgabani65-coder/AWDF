@@ -64,7 +64,7 @@ app.get('/tasks/:id', validateTaskId, (req, res) => {
     res.status(200).json(task);
 });
 
-// POST /tasks - Create a new task
+// POST /tasks - Create a new task (RMM Level 2: Uses POST verb, returns 201 Created with Location header)
 app.post('/tasks', (req, res) => {
     const { title, completed } = req.body;
 
@@ -79,13 +79,13 @@ app.post('/tasks', (req, res) => {
     };
 
     tasks.push(newTask);
-    res.status(201).json({
+    res.location(`/tasks/${newTask.id}`).status(201).json({
         message: 'Task created successfully',
         data: newTask
     });
 });
 
-// PUT /tasks/:id - Update an existing task
+// PUT /tasks/:id - Update an existing task (RMM Level 2: Uses PUT verb on specific resource URI, returns 200 OK / 404 / 400)
 app.put('/tasks/:id', validateTaskId, (req, res) => {
     const task = tasks.find(t => t.id === req.taskId);
     if (!task) {
@@ -111,7 +111,7 @@ app.put('/tasks/:id', validateTaskId, (req, res) => {
     });
 });
 
-// DELETE /tasks/:id - Delete a task by ID
+// DELETE /tasks/:id - Delete a task by ID (RMM Level 2: Uses DELETE verb on specific resource URI, returns 200 OK / 404)
 app.delete('/tasks/:id', validateTaskId, (req, res) => {
     const index = tasks.findIndex(t => t.id === req.taskId);
     if (index === -1) {
