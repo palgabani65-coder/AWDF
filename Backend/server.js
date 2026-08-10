@@ -1,139 +1,119 @@
-const express = require('express');
+const express = require("express");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const Task = require("./models/Task");
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Middleware
 app.use(express.json());
 
-// Handle invalid/empty JSON syntax errors from body-parser
-app.use((err, req, res, next) => {
-    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-        return res.status(400).json({ error: 'Invalid or empty JSON payload' });
-    }
-    next(err);
-});
-
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
+    console.log(
+        `${req.method} ${req.url} - ${new Date().toISOString()}`
+    );
     next();
 });
 
-const checkContentType = (req, res, next) => {
-    if (['POST', 'PUT'].includes(req.method)) {
-        if (!req.is('application/json')) {
-            return res.status(400).json({ error: 'Content-Type must be application/json' });
+// MongoDB connection
+mongoose
+    .connect(process.env.MONGO_URI)
+    .then(() => console.log("MongoDB Connected"))
+    .catch((err) => console.error("MongoDB Connection Error:", err));
+
+// GET all tasks
+app.get("/tasks", async (req, res, next) => {
+    try {
+        const tasks = await Task.find();
+
+        res.status(200).json({
+            success: true,
+            count: tasks.length,
+            data: tasks
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// CREATE task
+app.post("/tasks", async (req, res, next) => {
+    try {
+        const task = await Task.create(req.body);
+
+        res.status(201).json({
+            success: true,
+            message: "Task created successfully",
+            data: task
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// UPDATE task
+app.put("/tasks/:id", async (req, res, next) => {
+    try {
+        const task = await Task.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            {
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!task) {
+            return res.status(404).json({
+                success: false,
+                message: "Task not found"
+            });
         }
+
+        res.status(200).json({
+            success: true,
+            message: "Task updated successfully",
+            data: task
+        });
+    } catch (err) {
+        next(err);
     }
-    next();
-};
-app.use(checkContentType);
-
-const validateTaskId = (req, res, next) => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ error: 'Invalid Task ID format. ID must be a positive integer.' });
-    }
-    req.taskId = id;
-    next();
-};
-
-let tasks = [
-    { id: 1, title: 'GET', completed: true },
-    { id: 2, title: 'POST', completed: false },
-    { id: 3, title: 'PUT', completed: true },
-    { id: 4, title: 'DELETE', completed: true }
-];
-
-app.get('/', (req, res) => {
-    res.json({
-        message: 'Welcome to Task Manager RESTful API!',
-        status: 'Server is running successfully.'
-    });
 });
 
-// GET /tasks - Retrieve all tasks
-app.get('/tasks', (req, res) => {
-    res.status(200).json(tasks);
-});
+// DELETE task
+app.delete("/tasks/:id", async (req, res, next) => {
+    try {
+        const task = await Task.findByIdAndDelete(req.params.id);
 
-// GET /tasks/:id - Retrieve a specific task by ID
-app.get('/tasks/:id', validateTaskId, (req, res) => {
-    const task = tasks.find(t => t.id === req.taskId);
-    if (!task) {
-        return res.status(404).json({ error: 'Task not found' });
-    }
-    res.status(200).json(task);
-});
-
-// POST /tasks - Create a new task (RMM Level 2: Uses POST verb, returns 201 Created with Location header)
-app.post('/tasks', (req, res) => {
-    const { title, completed } = req.body;
-
-    if (!title || typeof title !== 'string' || title.trim() === '') {
-        return res.status(400).json({ error: 'Task title is required' });
-    }
-
-    const newTask = {
-        id: tasks.length > 0 ? Math.max(...tasks.map(t => t.id)) + 1 : 1,
-        title: title.trim(),
-        completed: Boolean(completed)
-    };
-
-    tasks.push(newTask);
-    res.location(`/tasks/${newTask.id}`).status(201).json({
-        message: 'Task created successfully',
-        data: newTask
-    });
-});
-
-// PUT /tasks/:id - Update an existing task (RMM Level 2: Uses PUT verb on specific resource URI, returns 200 OK / 404 / 400)
-app.put('/tasks/:id', validateTaskId, (req, res) => {
-    const task = tasks.find(t => t.id === req.taskId);
-    if (!task) {
-        return res.status(404).json({ error: 'Task not found' });
-    }
-
-    const { title, completed } = req.body;
-
-    if (title !== undefined) {
-        if (typeof title !== 'string' || title.trim() === '') {
-            return res.status(400).json({ error: 'Task title must be a non-empty string' });
+        if (!task) {
+            return res.status(404).json({
+                success: false,
+                message: "Task not found"
+            });
         }
-        task.title = title.trim();
-    }
 
-    if (completed !== undefined) {
-        task.completed = Boolean(completed);
+        res.status(200).json({
+            success: true,
+            message: "Task deleted successfully"
+        });
+    } catch (err) {
+        next(err);
     }
-
-    res.status(200).json({
-        message: 'Task updated successfully',
-        data: task
-    });
 });
 
-// DELETE /tasks/:id - Delete a task by ID (RMM Level 2: Uses DELETE verb on specific resource URI, returns 200 OK / 404)
-app.delete('/tasks/:id', validateTaskId, (req, res) => {
-    const index = tasks.findIndex(t => t.id === req.taskId);
-    if (index === -1) {
-        return res.status(404).json({ error: 'Task not found' });
-    }
-
-    const deletedTask = tasks.splice(index, 1)[0];
-    res.status(200).json({
-        message: 'Task deleted successfully',
-        data: deletedTask
-    });
-});
-
-app.use((req, res) => {
-    res.status(404).json({ error: 'Route not found' });
-});
+// Global Error Handler
 app.use((err, req, res, next) => {
-    console.error('Unhandled Error:', err.stack);
-    res.status(500).json({ error: 'Something went wrong' });
+    console.error(err.stack);
+
+    res.status(500).json({
+        success: false,
+        error: err.message || "Something went wrong"
+    });
 });
 
-// Start Server
+// Start server
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
