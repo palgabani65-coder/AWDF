@@ -9,7 +9,8 @@ const taskSchema = new mongoose.Schema({
     },
 
     description: {
-        type: String
+        type: String,
+        default: ""
     },
 
     completed: {
@@ -17,19 +18,14 @@ const taskSchema = new mongoose.Schema({
         default: false
     },
 
-    priority: {
-        type: String,
-        enum: {
-            values: ["low", "medium", "high"],
-            message: "Priority must be either low, medium, or high"
-        },
-        default: "medium"
-    },
-
-    createdAt: {
-        type: Date,
-        default: Date.now
+    dueDate: {
+        type: Date
     }
+}, {
+    timestamps: true,
+    collection: "tasks"
 });
 
 module.exports = mongoose.model("Task", taskSchema);
+
+

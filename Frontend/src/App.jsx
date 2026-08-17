@@ -7,6 +7,7 @@ import Footer from './components/Footer';
 import Home from './pages/Home';
 import Projects from './pages/Projects';
 import Contact from './pages/Contact';
+import Todo from './pages/Todo';
 import NotFound from './pages/NotFound';
 
 function App() {
@@ -52,9 +53,10 @@ function App() {
       <NavBar theme={theme} toggleTheme={toggleTheme} />
       
       <main className="main-content">
-        <Routes>
-          <Route path="/" element={<Home name={name} themeColor={themeColor} skillList={skillList} />} />
+          <Routes>
+          <Route path="/" element={ <Home name={name} themeColor={themeColor} skillList={skillList} /> } />
           <Route path="/projects" element={<Projects />} />
+          <Route path="/todo" element={<Todo />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

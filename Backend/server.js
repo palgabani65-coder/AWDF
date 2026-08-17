@@ -1,5 +1,6 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const cors = require("cors");
 require("dotenv").config();
 
 const Task = require("./models/Task");
@@ -7,7 +8,15 @@ const Task = require("./models/Task");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const corsOptions = {
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+};
+
 // Middleware
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -26,7 +35,7 @@ mongoose
 // GET all tasks
 app.get("/tasks", async (req, res, next) => {
     try {
-        const tasks = await Task.find();
+        const tasks = await Task.find().sort({ createdAt: -1 });
 
         res.status(200).json({
             success: true,
@@ -53,7 +62,7 @@ app.post("/tasks", async (req, res, next) => {
     }
 });
 
-// UPDATE task
+// UPDATE task (supports full update: title, description, priority, completed, dueDate)
 app.put("/tasks/:id", async (req, res, next) => {
     try {
         const task = await Task.findByIdAndUpdate(
@@ -82,7 +91,22 @@ app.put("/tasks/:id", async (req, res, next) => {
     }
 });
 
-// DELETE task
+// DELETE ALL COMPLETED TASKS
+app.delete("/tasks/completed/clear", async (req, res, next) => {
+    try {
+        const result = await Task.deleteMany({ completed: true });
+
+        res.status(200).json({
+            success: true,
+            message: `${result.deletedCount} completed tasks deleted`,
+            count: result.deletedCount
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// DELETE single task by ID
 app.delete("/tasks/:id", async (req, res, next) => {
     try {
         const task = await Task.findByIdAndDelete(req.params.id);
@@ -102,6 +126,7 @@ app.delete("/tasks/:id", async (req, res, next) => {
         next(err);
     }
 });
+
 
 // Global Error Handler
 app.use((err, req, res, next) => {
