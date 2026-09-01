@@ -1,0 +1,200 @@
+{
+  "info": {
+    "_postman_id": "8f3b2d14-a74e-4b69-8e4a-5f92c10b77b1",
+    "name": "Practical 7: Authentication & Middleware Pipeline",
+    "description": "Postman test suite for ITUE301 Practical 7: User registration, bcrypt password hashing, JWT generation, auth middleware verification, input validation, and /me endpoint.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Register User (POST /register)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"student@example.com\",\n  \"password\": \"secretpassword123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["register"]
+        },
+        "description": "Registers a new user. Passwords are automatically hashed with bcrypt (cost factor 10) before MongoDB persistence."
+      }
+    },
+    {
+      "name": "2. Login User (POST /login)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const response = pm.response.json();",
+              "if (response.success && response.token) {",
+              "    pm.collectionVariables.set('jwt_token', response.token);",
+              "    console.log('JWT Token successfully set:', response.token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"student@example.com\",\n  \"password\": \"secretpassword123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["login"]
+        },
+        "description": "Authenticates user using bcrypt.compare and returns signed JWT with 1h expiry. Automatically populates collection variable 'jwt_token'."
+      }
+    },
+    {
+      "name": "3. Get Logged-in User Profile (GET /me) [Protected]",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/me",
+          "host": ["{{baseUrl}}"],
+          "path": ["me"]
+        },
+        "description": "Supplementary endpoint returning user details from decoded JWT payload without exposing hashed password."
+      }
+    },
+    {
+      "name": "4. GET /tasks without Token (Expected: 401 Unauthorized)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/tasks",
+          "host": ["{{baseUrl}}"],
+          "path": ["tasks"]
+        },
+        "description": "Tests route protection. Omitting the Authorization header returns 401 Unauthorized."
+      }
+    },
+    {
+      "name": "5. GET /tasks with Bearer Token (Expected: 200 OK)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tasks",
+          "host": ["{{baseUrl}}"],
+          "path": ["tasks"]
+        },
+        "description": "Tests route access with valid Bearer token. Returns tasks belonging to the authenticated user."
+      }
+    },
+    {
+      "name": "6. POST /tasks Missing Title (Expected: 400 Bad Request)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Missing title field to test validation middleware\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tasks",
+          "host": ["{{baseUrl}}"],
+          "path": ["tasks"]
+        },
+        "description": "Demonstrates server-side input validation middleware rejecting invalid task payload before hitting database."
+      }
+    },
+    {
+      "name": "7. POST /tasks Valid Task (Expected: 201 Created)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Implement Middleware Pipeline in Express\",\n  \"description\": \"Practical 7 task demonstrating authentication and validation\",\n  \"completed\": false\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tasks",
+          "host": ["{{baseUrl}}"],
+          "path": ["tasks"]
+        },
+        "description": "Creates task associated with authenticated user ID in MongoDB."
+      }
+    },
+    {
+      "name": "8. GET /tasks with Malformed Token (Expected: 401 Unauthorized)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer tampered_invalid_token_sample"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tasks",
+          "host": ["{{baseUrl}}"],
+          "path": ["tasks"]
+        },
+        "description": "Verifies that jwt.verify() safely handles invalid tokens inside try/catch without crashing the Express server."
+      }
+    }
+  ]
+}

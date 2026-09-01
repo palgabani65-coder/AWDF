@@ -22,6 +22,12 @@ function NavBar({ theme, toggleTheme }) {
             Projects
           </NavLink>
           <NavLink 
+            to="/todo" 
+            className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}
+          >
+            Tasks
+          </NavLink>
+          <NavLink 
             to="/contact" 
             className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}
           >
