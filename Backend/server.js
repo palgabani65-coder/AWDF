@@ -44,10 +44,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// MongoDB connection
+// MongoDB connection (Practical 11: Support Docker Compose service name and fallback)
+const MONGO_URI = process.env.MONGO_URI || "mongodb://mongodb:27017/taskdb";
 mongoose
-    .connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB Connected"))
+    .connect(MONGO_URI)
+    .then(() => console.log(`MongoDB Connected: ${MONGO_URI}`))
     .catch((err) => console.error("MongoDB Connection Error:", err));
 
 // ==========================================

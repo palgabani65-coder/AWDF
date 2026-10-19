@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Frontend Service (React / Vite)
+  # ==========================================
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: awdf-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # ==========================================
+  # Backend Service (Node.js / Express)
+  # ==========================================
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: awdf-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - MONGO_URI=mongodb://mongodb:27017/taskdb
+      - JWT_SECRET=supersecret_jwt_key_practical11_awdf
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # ==========================================
+  # Database Service (MongoDB)
+  # ==========================================
+  mongodb:
+    image: mongo:latest
+    container_name: awdf-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - app-network
+    restart: unless-stopped
+
+# ==========================================
+# Named Volumes (Data Persistence)
+# ==========================================
+volumes:
+  mongo-data:
+    driver: local
+
+# ==========================================
+# Bridge Network (Inter-service Communication)
+# ==========================================
+networks:
+  app-network:
+    driver: bridge
