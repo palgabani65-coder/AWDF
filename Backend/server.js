@@ -22,6 +22,9 @@ const {
 const taskEvents = require("./events");
 require("./listeners");
 
+// In-Memory Caching (Practical 9)
+const cache = require("./cache");
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -29,6 +32,7 @@ const corsOptions = {
     origin: "http://localhost:5173",
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    exposedHeaders: ["X-Cache"],
     credentials: true
 };
 
@@ -168,10 +172,18 @@ app.get("/me", auth, async (req, res, next) => {
 // PROTECTED TASK ROUTES (Practical 7 Middleware Pipeline)
 // ==========================================
 
-// GET /tasks - Protected: retrieve all tasks for authenticated user
+// GET /tasks - Protected: retrieve all tasks for authenticated user (Practical 9: In-Memory Caching)
 app.get("/tasks", auth, async (req, res, next) => {
     try {
-        // Return tasks belonging to user or previously created unassigned tasks
+        const cacheKey = `tasks_${req.user.id}`;
+        const cachedData = cache.get(cacheKey);
+
+        if (cachedData) {
+            res.setHeader("X-Cache", "HIT");
+            return res.status(200).json(cachedData);
+        }
+
+        // Cache MISS: Query MongoDB
         const tasks = await Task.find({
             $or: [
                 { user: req.user.id },
@@ -188,11 +200,17 @@ app.get("/tasks", auth, async (req, res, next) => {
             return obj;
         });
 
-        res.status(200).json({
+        const responsePayload = {
             success: true,
             count: normalizedTasks.length,
             data: normalizedTasks
-        });
+        };
+
+        // Cache response with 60-second TTL
+        cache.set(cacheKey, responsePayload, 60);
+
+        res.setHeader("X-Cache", "MISS");
+        res.status(200).json(responsePayload);
     } catch (err) {
         next(err);
     }
@@ -212,6 +230,10 @@ app.post("/tasks", auth, validateTask, async (req, res, next) => {
             dueDate: req.body.dueDate || null,
             user: req.user.id
         });
+
+        // Practical 9: Invalidate cache for this user on write
+        cache.del(`tasks_${req.user.id}`);
+        cache.del("all_tasks");
 
         // Practical 10: Respond immediately before event handler finishes
         console.log(`[API] Response sent at ${new Date().toISOString()}`);
@@ -257,6 +279,11 @@ app.put("/tasks/:id", auth, validateTask, async (req, res, next) => {
             });
         }
 
+        // Practical 9: Invalidate single-task cache and list cache
+        cache.del(`task_${req.params.id}`);
+        cache.del(`tasks_${req.user.id}`);
+        cache.del("all_tasks");
+
         res.status(200).json({
             success: true,
             message: "Task updated successfully",
@@ -278,6 +305,10 @@ app.delete("/tasks/completed/clear", auth, async (req, res, next) => {
                 { user: null }
             ]
         });
+
+        // Practical 9: Invalidate user tasks cache
+        cache.del(`tasks_${req.user.id}`);
+        cache.del("all_tasks");
 
         res.status(200).json({
             success: true,
@@ -301,6 +332,11 @@ app.delete("/tasks/:id", auth, async (req, res, next) => {
             });
         }
 
+        // Practical 9: Invalidate single-task cache and list cache
+        cache.del(`task_${req.params.id}`);
+        cache.del(`tasks_${req.user.id}`);
+        cache.del("all_tasks");
+
         // Practical 10: Supplementary Problem 1 - Respond immediately and emit 'task-deleted'
         console.log(`[API] Task deletion response sent at ${new Date().toISOString()}`);
         res.status(200).json({
@@ -316,6 +352,60 @@ app.delete("/tasks/:id", auth, async (req, res, next) => {
     } catch (err) {
         next(err);
     }
+});
+
+// GET /tasks/:id - Protected: retrieve single task with per-task caching (Practical 9 Supplementary 1)
+app.get("/tasks/:id", auth, async (req, res, next) => {
+    try {
+        const cacheKey = `task_${req.params.id}`;
+        const cachedTask = cache.get(cacheKey);
+
+        if (cachedTask) {
+            res.setHeader("X-Cache", "HIT");
+            return res.status(200).json(cachedTask);
+        }
+
+        const task = await Task.findById(req.params.id);
+        if (!task) {
+            return res.status(404).json({
+                success: false,
+                message: "Task not found"
+            });
+        }
+
+        const responsePayload = {
+            success: true,
+            data: task
+        };
+
+        // Cache single task with 60-second TTL
+        cache.set(cacheKey, responsePayload, 60);
+
+        res.setHeader("X-Cache", "MISS");
+        res.status(200).json(responsePayload);
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ==========================================
+// CACHE MONITORING & DEBUG ENDPOINTS (Practical 9 Supplementary 2)
+// ==========================================
+app.get("/cache/stats", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "Cache statistics retrieved successfully",
+        data: cache.getStats()
+    });
+});
+
+app.post("/cache/clear", (req, res) => {
+    cache.flushAll();
+    cache.resetStats();
+    res.status(200).json({
+        success: true,
+        message: "In-memory cache flushed and statistics reset successfully."
+    });
 });
 
 // ==========================================
