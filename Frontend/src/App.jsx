@@ -1,18 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import NavBar from './components/NavBar';
 import Footer from './components/Footer';
+import LoadingFallback from './components/LoadingFallback';
+import { AuthProvider } from './context/AuthContext';
 
-// Pages
+// Landing page (eagerly loaded for instantaneous LCP and FCP)
 import Home from './pages/Home';
-import Projects from './pages/Projects';
-import Contact from './pages/Contact';
-import Todo from './pages/Todo';
-import NotFound from './pages/NotFound';
+
+// Route-Based Code Splitting with React.lazy() for all secondary pages
+const Projects = lazy(() => import('./pages/Projects'));
+const Contact = lazy(() => import('./pages/Contact'));
+const Todo = lazy(() => import('./pages/Todo'));
+const Login = lazy(() => import('./pages/Login'));
+const AdminReport = lazy(() => import('./pages/AdminReport'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 function App() {
   const name = "Pal Gabani";
-  const themeColor = "#2dd4bf"; // Mint Teal theme color prop
+  const themeColor = "#d4af37"; // Solaris Gold primary accent
   const skillList = [
     'Java',
     'Python',
@@ -22,9 +29,9 @@ function App() {
     'Database Systems'
   ];
 
-  // Theme state: light mode by default matching soft blue background
+  // Theme state: Solaris Gold dark mode canvas by default
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('theme') || 'light';
+    return localStorage.getItem('theme') || 'dark';
   });
 
   const toggleTheme = () => {
@@ -47,23 +54,30 @@ function App() {
   }, [theme]);
 
   return (
-    <div className="app-container">
-      <div className="ambient-glow glow-1"></div>
-      <div className="ambient-glow glow-2"></div>
-      <NavBar theme={theme} toggleTheme={toggleTheme} />
-      
-      <main className="main-content">
-          <Routes>
-          <Route path="/" element={ <Home name={name} themeColor={themeColor} skillList={skillList} /> } />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/todo" element={<Todo />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </main>
+    <AuthProvider>
+      <div className="app-container">
+        <div className="ambient-glow glow-1"></div>
+        <div className="ambient-glow glow-2"></div>
+        <NavBar theme={theme} toggleTheme={toggleTheme} />
+        
+        <main className="main-content">
+          <Suspense fallback={<LoadingFallback message="Loading page component..." />}>
+            <Routes>
+              <Route path="/" element={ <Home name={name} themeColor={themeColor} skillList={skillList} /> } />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/todo" element={<Todo />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/admin/report" element={<AdminReport />} />
+              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </main>
 
-      <Footer />
-    </div>
+        <Footer />
+      </div>
+    </AuthProvider>
   );
 }
 
