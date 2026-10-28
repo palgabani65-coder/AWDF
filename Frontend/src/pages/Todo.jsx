@@ -1,68 +1,75 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const API_URL = "http://localhost:5000/tasks";
-const AUTH_URL = "http://localhost:5000";
+
+// Sticky Note Color Palette matching the physical board drawing
+const STICKY_PALETTES = [
+  { borderTop: "#f2ca50", tape: "#f2ca50", accent: "rgba(242, 202, 80, 0.15)" }, // Gold Sticky
+  { borderTop: "#f472b6", tape: "#f472b6", accent: "rgba(244, 114, 182, 0.15)" }, // Rose Sticky
+  { borderTop: "#38bdf8", tape: "#38bdf8", accent: "rgba(56, 189, 248, 0.15)" }, // Sky Sticky
+  { borderTop: "#a3e635", tape: "#a3e635", accent: "rgba(163, 230, 53, 0.15)" }, // Lime Sticky
+  { borderTop: "#fb923c", tape: "#fb923c", accent: "rgba(251, 146, 60, 0.15)" }, // Orange Sticky
+];
+
+const getStickyStyle = (index) => STICKY_PALETTES[index % STICKY_PALETTES.length];
+
+const KANBAN_COLUMNS = [
+  { id: "todo", title: "To do", icon: "", hint: "Backlog & upcoming tasks" },
+  { id: "in-progress", title: "In progress", icon: "", hint: "Currently being worked on" },
+  { id: "done", title: "Done", icon: "", hint: "Completed objectives" },
+];
 
 function Todo() {
-  // Authentication state (Practical 7)
-  const [token, setToken] = useState(() => localStorage.getItem("token") || null);
-  const [user, setUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("user") || "null");
-    } catch {
-      return null;
-    }
-  });
-
-  const [authMode, setAuthMode] = useState("login"); // 'login' or 'register'
-  const [authForm, setAuthForm] = useState({ email: "", password: "" });
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [authSuccess, setAuthSuccess] = useState(null);
+  const { token, logout } = useAuth();
 
   // Tasks state
   const [tasks, setTasks] = useState([]);
+
+  // View mode: 'kanban' (default matching user's drawing) or 'list'
+  const [viewMode, setViewMode] = useState("kanban");
+
+  // Drag & drop states
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [activeDropCol, setActiveDropCol] = useState(null);
 
   // Form state for creating task
   const [form, setForm] = useState({
     title: "",
     description: "",
-    status: "pending", // 'pending' or 'completed'
+    status: "todo", // 'todo', 'in-progress', or 'done'
   });
 
   // State for editing task
   const [editingTask, setEditingTask] = useState(null);
 
-  // Search, Filter, & Sorting states
+  // Search & Sorting states
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all"); // 'all', 'pending', 'completed'
-  const [sortBy, setSortBy] = useState("newest"); // 'newest', 'oldest', 'alphabetical'
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState(null);
 
-  // LOGOUT HANDLER
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setToken(null);
-    setUser(null);
-    setTasks([]);
-    setAuthSuccess("You have been successfully logged out.");
-    setAuthError(null);
-  }, []);
+  // Practical 13: AI Assistant State
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [aiNotice, setAiNotice] = useState(null);
 
   // 401 UNAUTHORIZED / TOKEN EXPIRY HANDLER
   const handleUnauthorized = useCallback((message) => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setToken(null);
-    setUser(null);
+    logout();
     setTasks([]);
-    setAuthError(
-      message || "Session expired or unauthorized. Please log in again to continue."
+    setApiError(
+      message || "Session expired or unauthorized. Please log in again from the navbar."
     );
+  }, [logout]);
+
+  // Helper to normalize task status
+  const getTaskStatus = useCallback((task) => {
+    if (task.status) return task.status;
+    return task.completed ? "done" : "todo";
   }, []);
 
   // FETCH TASKS (Protected by Bearer Token)
@@ -93,7 +100,7 @@ function Todo() {
         const result = await response.json();
 
         if (result.success) {
-          setTasks(result.data);
+          setTasks(result.data || []);
         } else {
           setApiError(result.error || result.message || "Failed to fetch tasks from server");
         }
@@ -109,95 +116,13 @@ function Todo() {
     [token, handleUnauthorized]
   );
 
-  // Load tasks on initial mount if authenticated
   useEffect(() => {
     if (token) {
       fetchTasks(token);
+    } else {
+      setTasks([]);
     }
   }, [token, fetchTasks]);
-
-  // AUTH FORM CHANGE
-  const handleAuthChange = (e) => {
-    const { name, value } = e.target;
-    setAuthForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  // SUBMIT AUTH FORM (LOGIN / REGISTER)
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError(null);
-    setAuthSuccess(null);
-
-    if (!authForm.email || !authForm.password) {
-      setAuthError("Please enter both email and password.");
-      return;
-    }
-
-    if (authMode === "register" && authForm.password.length < 6) {
-      setAuthError("Password must be at least 6 characters long.");
-      return;
-    }
-
-    try {
-      setAuthLoading(true);
-      const endpoint = authMode === "register" ? `${AUTH_URL}/register` : `${AUTH_URL}/login`;
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: authForm.email.trim(),
-          password: authForm.password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        setAuthError(data.message || data.error || "Authentication failed.");
-        return;
-      }
-
-      if (authMode === "register") {
-        setAuthSuccess("Registration successful! Logging you in...");
-        // Auto-login after registration
-        const loginRes = await fetch(`${AUTH_URL}/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: authForm.email.trim(),
-            password: authForm.password,
-          }),
-        });
-        const loginData = await loginRes.json();
-        if (loginData.success) {
-          localStorage.setItem("token", loginData.token);
-          localStorage.setItem("user", JSON.stringify(loginData.user));
-          setToken(loginData.token);
-          setUser(loginData.user);
-          setAuthForm({ email: "", password: "" });
-          fetchTasks(loginData.token);
-        }
-      } else {
-        // Login success
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("user", JSON.stringify(data.user));
-        setToken(data.token);
-        setUser(data.user);
-        setAuthForm({ email: "", password: "" });
-        setAuthSuccess("Login successful! Welcome back.");
-        fetchTasks(data.token);
-      }
-    } catch (err) {
-      console.error("Auth error:", err);
-      setAuthError("Failed to reach authentication server. Check backend connection.");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
 
   // TASK FORM CHANGE
   const handleChange = (e) => {
@@ -208,14 +133,73 @@ function Todo() {
     }));
   };
 
-  // CREATE TASK (Protected + Validated)
-  const addTask = async (e) => {
-    e.preventDefault();
+  // PRACTICAL 13: AI DESCRIPTION GENERATOR
+  const generateAiDescription = async () => {
+    const title = form.title.trim();
+    if (!title) {
+      alert("Please enter a task title first so the AI can generate a relevant description.");
+      return;
+    }
 
-    if (!form.title.trim()) {
+    try {
+      setGeneratingAi(true);
+      setAiNotice(null);
+
+      const response = await fetch("http://localhost:5000/api/ai/generate-description", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ title })
+      });
+
+      if (response.status === 401) {
+        handleUnauthorized("Your session has expired. Please log in again.");
+        return;
+      }
+
+      const result = await response.json();
+
+      if (result.success && result.description) {
+        setForm((prev) => ({
+          ...prev,
+          description: result.description
+        }));
+        setAiNotice({
+          provider: result.provider,
+          disclaimer: result.disclaimer || "AI-generated content. Please review before saving."
+        });
+      } else {
+        alert(result.message || "Unable to generate AI description.");
+      }
+    } catch (err) {
+      console.error("AI Generation request failed:", err);
+      // Client-side graceful degradation fallback
+      setForm((prev) => ({
+        ...prev,
+        description: `Action plan for '${title}': Define deliverables, allocate resources, and track progress.`
+      }));
+      setAiNotice({
+        provider: "offline_fallback",
+        disclaimer: "AI service currently offline. Showing local fallback draft."
+      });
+    } finally {
+      setGeneratingAi(false);
+    }
+  };
+
+  // CREATE TASK (Protected + Validated)
+  const addTask = async (e, customStatus = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const taskTitle = form.title.trim();
+    if (!taskTitle) {
       alert("Please enter a task title (minimum 3 characters)");
       return;
     }
+
+    const taskStatus = customStatus || form.status || "todo";
 
     try {
       setSubmitting(true);
@@ -228,9 +212,10 @@ function Todo() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          title: form.title.trim(),
+          title: taskTitle,
           description: form.description.trim(),
-          completed: form.status === "completed",
+          status: taskStatus,
+          completed: taskStatus === "done",
         }),
       });
 
@@ -246,7 +231,7 @@ function Todo() {
         setForm({
           title: "",
           description: "",
-          status: "pending",
+          status: "todo",
         });
       } else {
         alert(result.message || result.error || "Failed to add task");
@@ -259,17 +244,27 @@ function Todo() {
     }
   };
 
-  // TOGGLE TASK STATUS (Protected)
-  const toggleTask = async (task) => {
+  // UPDATE TASK STATUS (Optimistic UI + Server Sync)
+  const updateTaskStatus = async (taskId, newStatus) => {
+    const isCompleted = newStatus === "done";
+
+    // Optimistic local update
+    setTasks((prev) =>
+      prev.map((t) =>
+        t._id === taskId ? { ...t, status: newStatus, completed: isCompleted } : t
+      )
+    );
+
     try {
-      const response = await fetch(`${API_URL}/${task._id}`, {
+      const response = await fetch(`${API_URL}/${taskId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          completed: !task.completed,
+          status: newStatus,
+          completed: isCompleted,
         }),
       });
 
@@ -279,17 +274,42 @@ function Todo() {
       }
 
       const result = await response.json();
-
-      if (result.success) {
-        setTasks((prev) =>
-          prev.map((item) => (item._id === task._id ? result.data : item))
-        );
-      } else {
-        alert(result.error || result.message || "Failed to update task");
+      if (!result.success) {
+        fetchTasks();
       }
     } catch (error) {
-      console.error("Error updating task:", error);
-      alert("Failed to update task.");
+      console.error("Error moving task:", error);
+      fetchTasks();
+    }
+  };
+
+  // DRAG AND DROP HANDLERS
+  const handleDragStart = (e, taskId) => {
+    e.dataTransfer.setData("text/plain", taskId);
+    setDraggedTaskId(taskId);
+  };
+
+  const handleDragOver = (e, colId) => {
+    e.preventDefault();
+    if (activeDropCol !== colId) {
+      setActiveDropCol(colId);
+    }
+  };
+
+  const handleDragLeave = (e, colId) => {
+    if (activeDropCol === colId) {
+      setActiveDropCol(null);
+    }
+  };
+
+  const handleDrop = (e, targetStatus) => {
+    e.preventDefault();
+    const taskId = e.dataTransfer.getData("text/plain") || draggedTaskId;
+    setActiveDropCol(null);
+    setDraggedTaskId(null);
+
+    if (taskId) {
+      updateTaskStatus(taskId, targetStatus);
     }
   };
 
@@ -301,6 +321,9 @@ function Todo() {
       return;
     }
 
+    const taskStatus = editingTask.status || (editingTask.completed ? "done" : "todo");
+    const isCompleted = taskStatus === "done";
+
     try {
       const response = await fetch(`${API_URL}/${editingTask._id}`, {
         method: "PUT",
@@ -311,7 +334,8 @@ function Todo() {
         body: JSON.stringify({
           title: editingTask.title.trim(),
           description: editingTask.description ? editingTask.description.trim() : "",
-          completed: editingTask.completed,
+          status: taskStatus,
+          completed: isCompleted,
         }),
       });
 
@@ -367,13 +391,13 @@ function Todo() {
     }
   };
 
-  // CLEAR ALL COMPLETED TASKS (Protected)
+  // CLEAR ALL DONE TASKS (Protected)
   const clearCompleted = async () => {
-    const completedCount = tasks.filter((t) => t.completed).length;
-    if (completedCount === 0) return;
+    const doneTasks = tasks.filter((t) => getTaskStatus(t) === "done");
+    if (doneTasks.length === 0) return;
 
     const confirmed = window.confirm(
-      `Are you sure you want to delete all ${completedCount} completed tasks?`
+      `Are you sure you want to delete all ${doneTasks.length} done tasks?`
     );
     if (!confirmed) return;
 
@@ -393,9 +417,9 @@ function Todo() {
       const result = await response.json();
 
       if (result.success) {
-        setTasks((prev) => prev.filter((task) => !task.completed));
+        setTasks((prev) => prev.filter((task) => getTaskStatus(task) !== "done"));
       } else {
-        alert(result.message || result.error || "Failed to clear completed tasks");
+        alert(result.message || result.error || "Failed to clear done tasks");
       }
     } catch (error) {
       console.error("Error clearing completed tasks:", error);
@@ -405,17 +429,18 @@ function Todo() {
 
   // STATS CALCULATIONS
   const totalTasks = tasks.length;
-  const completedTasks = tasks.filter((task) => task.completed).length;
-  const pendingTasks = totalTasks - completedTasks;
+  const todoCount = tasks.filter((t) => getTaskStatus(t) === "todo").length;
+  const inProgressCount = tasks.filter((t) => getTaskStatus(t) === "in-progress").length;
+  const doneCount = tasks.filter((t) => getTaskStatus(t) === "done").length;
   const completionPercentage =
-    totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
 
   // FILTERED & SORTED TASKS
   const processedTasks = useMemo(() => {
     return tasks
       .filter((task) => {
-        if (statusFilter === "pending" && task.completed) return false;
-        if (statusFilter === "completed" && !task.completed) return false;
+        const st = getTaskStatus(task);
+        if (statusFilter !== "all" && st !== statusFilter) return false;
 
         if (searchTerm.trim()) {
           const term = searchTerm.toLowerCase();
@@ -437,7 +462,16 @@ function Todo() {
         }
         return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
       });
-  }, [tasks, statusFilter, searchTerm, sortBy]);
+  }, [tasks, statusFilter, searchTerm, sortBy, getTaskStatus]);
+
+  // Tasks partitioned by Kanban column
+  const columnTasks = useMemo(() => {
+    return {
+      todo: processedTasks.filter((t) => getTaskStatus(t) === "todo"),
+      "in-progress": processedTasks.filter((t) => getTaskStatus(t) === "in-progress"),
+      done: processedTasks.filter((t) => getTaskStatus(t) === "done"),
+    };
+  }, [processedTasks, getTaskStatus]);
 
   const formatDate = (dateString) => {
     if (!dateString) return "";
@@ -445,7 +479,6 @@ function Todo() {
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
-      year: "numeric",
     });
   };
 
@@ -454,233 +487,63 @@ function Todo() {
       <div className="container">
         {/* Section Header */}
         <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-          <h2 className="section-title" style={{ marginBottom: "0.5rem" }}>
-            Task Management System
-          </h2>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}>
-            Practical 7: JWT Authentication &amp; Express Middleware Pipeline
-          </p>
+
         </div>
 
-        {/* AUTHENTICATION CONTROL CARD / STATUS BANNER */}
-        {token && user ? (
+        {/* LOCKED STATE BANNER WHEN NOT AUTHENTICATED */}
+        {!token && (
           <div
-            className="bento-card auth-banner"
+            className="bento-card auth-locked-card"
             style={{
-              marginBottom: "1.75rem",
-              padding: "1rem 1.5rem",
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "1rem",
-              borderLeft: "4px solid #10b981",
-              backgroundColor: "rgba(16, 185, 129, 0.05)",
+              maxWidth: "540px",
+              margin: "1.5rem auto 3rem auto",
+              textAlign: "center",
+              padding: "3.5rem 2rem",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-              <span
-                style={{
-                  fontSize: "1.3rem",
-                  background: "rgba(16, 185, 129, 0.15)",
-                  padding: "0.4rem 0.6rem",
-                  borderRadius: "8px",
-                }}
-              >
-                🔐
-              </span>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <strong style={{ color: "var(--text-primary)" }}>{user.email}</strong>
-                  <span
-                    style={{
-                      fontSize: "0.75rem",
-                      backgroundColor: "#10b981",
-                      color: "#fff",
-                      padding: "0.15rem 0.5rem",
-                      borderRadius: "12px",
-                      fontWeight: "600",
-                    }}
-                  >
-                    JWT Verified
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                  Bearer token active (1-hour expiry) • Route-level middleware protection enabled
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleLogout}
-              className="btn btn-secondary"
+            <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🔐</div>
+            <h3 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
+              Authentication Required
+            </h3>
+            <p
               style={{
-                borderColor: "rgba(239, 68, 68, 0.4)",
-                color: "#ef4444",
-                padding: "0.4rem 1rem",
-                fontSize: "0.85rem",
-                display: "flex",
+                color: "var(--text-secondary)",
+                fontSize: "0.95rem",
+                lineHeight: "1.6",
+                marginBottom: "2rem",
+              }}
+            >
+              Task operations are protected by JWT authentication. Please use the{" "}
+              <strong style={{ color: "var(--text-primary)" }}>Sign In</strong>{" "}
+              option in the navigation bar to log in or register your account.
+            </p>
+            <Link
+              to="/login"
+              className="btn btn-primary"
+              style={{
+                display: "inline-flex",
                 alignItems: "center",
-                gap: "0.4rem",
+                gap: "0.5rem",
+                padding: "0.75rem 1.75rem",
+                textDecoration: "none",
               }}
             >
-              🚪 Logout
-            </button>
-          </div>
-        ) : (
-          <div
-            className="bento-card auth-card"
-            style={{
-              marginBottom: "2rem",
-              padding: "1.75rem",
-              maxWidth: "520px",
-              margin: "0 auto 2.5rem auto",
-            }}
-          >
-            <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
-              <div style={{ fontSize: "2.2rem", marginBottom: "0.25rem" }}>🛡️</div>
-              <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "1.35rem" }}>
-                Authentication Required
-              </h3>
-              <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: 0 }}>
-                Log in or register to access your JWT-protected task pipeline.
-              </p>
-            </div>
-
-            {/* Mode Switch Tabs */}
-            <div
-              style={{
-                display: "flex",
-                background: "var(--bg-secondary)",
-                padding: "0.3rem",
-                borderRadius: "10px",
-                marginBottom: "1.25rem",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode("login");
-                  setAuthError(null);
-                  setAuthSuccess(null);
-                }}
-                style={{
-                  flex: 1,
-                  padding: "0.55rem",
-                  border: "none",
-                  borderRadius: "7px",
-                  background: authMode === "login" ? "var(--bg-primary)" : "transparent",
-                  color: authMode === "login" ? "var(--text-primary)" : "var(--text-muted)",
-                  fontWeight: authMode === "login" ? "600" : "400",
-                  cursor: "pointer",
-                  boxShadow:
-                    authMode === "login" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
-                  transition: "all 0.2s ease",
-                }}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode("register");
-                  setAuthError(null);
-                  setAuthSuccess(null);
-                }}
-                style={{
-                  flex: 1,
-                  padding: "0.55rem",
-                  border: "none",
-                  borderRadius: "7px",
-                  background: authMode === "register" ? "var(--bg-primary)" : "transparent",
-                  color: authMode === "register" ? "var(--text-primary)" : "var(--text-muted)",
-                  fontWeight: authMode === "register" ? "600" : "400",
-                  cursor: "pointer",
-                  boxShadow:
-                    authMode === "register" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
-                  transition: "all 0.2s ease",
-                }}
-              >
-                Register
-              </button>
-            </div>
-
-            {/* Error / Success Notifications */}
-            {authError && (
-              <div
-                style={{
-                  padding: "0.75rem 1rem",
-                  marginBottom: "1rem",
-                  borderRadius: "8px",
-                  background: "rgba(239, 68, 68, 0.1)",
-                  border: "1px solid rgba(239, 68, 68, 0.25)",
-                  color: "#ef4444",
-                  fontSize: "0.85rem",
-                }}
-              >
-                ⚠️ {authError}
-              </div>
-            )}
-
-            {authSuccess && (
-              <div
-                style={{
-                  padding: "0.75rem 1rem",
-                  marginBottom: "1rem",
-                  borderRadius: "8px",
-                  background: "rgba(16, 185, 129, 0.1)",
-                  border: "1px solid rgba(16, 185, 129, 0.25)",
-                  color: "#10b981",
-                  fontSize: "0.85rem",
-                }}
-              >
-                ✓ {authSuccess}
-              </div>
-            )}
-
-            {/* Auth Form */}
-            <form onSubmit={handleAuthSubmit}>
-              <div className="form-group" style={{ marginBottom: "1rem" }}>
-                <label className="form-label">Email Address</label>
-                <input
-                  className="form-input"
-                  type="email"
-                  name="email"
-                  value={authForm.email}
-                  onChange={handleAuthChange}
-                  placeholder="student@example.com"
-                  required
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: "1.25rem" }}>
-                <label className="form-label">
-                  Password {authMode === "register" && "(min 6 characters)"}
-                </label>
-                <input
-                  className="form-input"
-                  type="password"
-                  name="password"
-                  value={authForm.password}
-                  onChange={handleAuthChange}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: "100%", padding: "0.75rem" }}
-                disabled={authLoading}
-              >
-                {authLoading
-                  ? "Authenticating..."
-                  : authMode === "login"
-                  ? "Log In with JWT"
-                  : "Create Account (Bcrypt Hashing)"}
-              </button>
-            </form>
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </svg>
+              <span>Go to Login Page</span>
+            </Link>
           </div>
         )}
 
@@ -704,273 +567,569 @@ function Todo() {
             <div>
               ⚠️ <strong>Backend Connection Notice:</strong> {apiError}
             </div>
-            {token && (
-              <button
-                onClick={() => fetchTasks(token)}
-                className="btn btn-secondary"
-                style={{ padding: "0.35rem 0.85rem", fontSize: "0.8rem", flexShrink: 0 }}
-              >
-                Retry
-              </button>
-            )}
+            <button
+              onClick={() => fetchTasks()}
+              className="btn btn-secondary"
+              style={{ padding: "0.35rem 0.85rem", fontSize: "0.8rem" }}
+            >
+              Retry
+            </button>
           </div>
         )}
 
-        {/* SHOW TASK DASHBOARD ONLY IF AUTHENTICATED */}
-        {token && user ? (
+        {/* AUTHENTICATED BOARD CONTENT */}
+        {token ? (
           <>
-            {/* Add Task Form Card */}
-            <div className="bento-card todo-form-card">
-              <h3>Add New Task</h3>
-
+            {/* Create Task Form */}
+            <div className="bento-card todo-form-card" style={{ marginBottom: "2rem" }}>
+              <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                Add New Task
+              </h3>
               <form onSubmit={addTask}>
-                <div className="form-group">
-                  <label className="form-label">Task Title (Min 3 characters)</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    name="title"
-                    value={form.title}
-                    onChange={handleChange}
-                    placeholder="What needs to be done?"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Description (Optional)</label>
-                  <textarea
-                    className="form-textarea"
-                    name="description"
-                    value={form.description}
-                    onChange={handleChange}
-                    placeholder="Add details, notes, or sub-tasks..."
-                    rows="3"
-                  />
-                </div>
-
-                <div className="form-bottom">
-                  <div className="form-group priority-group">
-                    <label className="form-label">Status</label>
-                    <select
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div className="form-group">
+                    <label className="form-label">Task Title (Min 3 characters)</label>
+                    <input
+                      type="text"
+                      name="title"
                       className="form-input"
-                      name="status"
-                      value={form.status}
+                      placeholder="e.g., Design executive header, Review pull request..."
+                      value={form.title}
                       onChange={handleChange}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="completed">Completed</option>
-                    </select>
+                      required
+                    />
                   </div>
 
-                  <button
-                    type="submit"
-                    className="btn btn-primary submit-btn"
-                    disabled={submitting}
+                  <div className="form-group">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem", flexWrap: "wrap", gap: "0.5rem" }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>Note Details / Description (Optional)</label>
+                      <button
+                        type="button"
+                        onClick={generateAiDescription}
+                        disabled={generatingAi || !form.title.trim()}
+                        className="btn"
+                        style={{
+                          padding: "0.3rem 0.75rem",
+                          fontSize: "0.78rem",
+                          borderRadius: "9999px",
+                          background: generatingAi ? "rgba(212, 175, 55, 0.2)" : "rgba(212, 175, 55, 0.12)",
+                          color: "#f2ca50",
+                          border: "1px solid rgba(212, 175, 55, 0.35)",
+                          cursor: generatingAi || !form.title.trim() ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.4rem",
+                          transition: "all 0.2s ease"
+                        }}
+                        title="Auto-generate an actionable description draft using AI"
+                      >
+                        {generatingAi ? (
+                          <>
+                            <span className="mini-spinner" style={{ width: "12px", height: "12px" }}></span>
+                            <span>Generating with AI...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>✨ Generate Description (AI)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <textarea
+                      name="description"
+                      className="form-textarea"
+                      placeholder="Add supplementary details, notes, or bullet points..."
+                      rows="3"
+                      value={form.description}
+                      onChange={handleChange}
+                    />
+                    {aiNotice && (
+                      <div
+                        style={{
+                          marginTop: "0.5rem",
+                          padding: "0.45rem 0.85rem",
+                          borderRadius: "8px",
+                          background: "rgba(212, 175, 55, 0.08)",
+                          border: "1px solid rgba(212, 175, 55, 0.25)",
+                          fontSize: "0.78rem",
+                          color: "var(--text-secondary)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "0.5rem"
+                        }}
+                      >
+                        <span>
+                          🤖 <strong>AI Suggestion ({aiNotice.provider}):</strong> {aiNotice.disclaimer}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAiNotice(null)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "var(--text-muted)",
+                            cursor: "pointer",
+                            fontSize: "0.95rem"
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "1rem",
+                    }}
                   >
-                    {submitting ? "Adding..." : "Add Task"}
-                  </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      <label className="form-label" style={{ marginBottom: 0 }}>
+                        Board Column:
+                      </label>
+                      <select
+                        name="status"
+                        className="form-input"
+                        value={form.status}
+                        onChange={handleChange}
+                        style={{ padding: "0.45rem 1rem", fontSize: "0.88rem", width: "160px" }}
+                      >
+                        <option value="todo">To do</option>
+                        <option value="in-progress">In progress</option>
+                        <option value="done">Done</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="btn btn-primary"
+                      style={{ padding: "0.65rem 1.75rem" }}
+                    >
+                      {submitting ? "Adding Task..." : "+ Add Task"}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
 
             {/* Task Overview Stats */}
-            <div className="todo-stats-grid">
-              <div className="bento-card stat-card">
-                <div className="stat-value">{totalTasks}</div>
-                <div className="stat-label">Total Tasks</div>
+            <div className="bento-grid" style={{ marginBottom: "2rem" }}>
+              <div className="bento-card metric-card">
+                <div className="metric-icon" style={{ background: "rgba(212, 175, 55, 0.15)", color: "#f2ca50" }}>
+                  📋
+                </div>
+                <div className="metric-content">
+                  <span className="metric-label">Total Board Tasks</span>
+                  <div className="metric-value">{totalTasks}</div>
+                  <span className="metric-hint">Active sticky notes</span>
+                </div>
               </div>
 
-              <div className="bento-card stat-card">
-                <div className="stat-value pending-color">{pendingTasks}</div>
-                <div className="stat-label">Pending</div>
+              <div className="bento-card metric-card">
+                <div className="metric-icon" style={{ background: "rgba(242, 202, 80, 0.15)", color: "#f2ca50" }}>
+                  📌
+                </div>
+                <div className="metric-content">
+                  <span className="metric-label">To Do</span>
+                  <div className="metric-value">{todoCount}</div>
+                  <span className="metric-hint">Queued backlog</span>
+                </div>
               </div>
 
-              <div className="bento-card stat-card">
-                <div className="stat-value completed-color">{completedTasks}</div>
-                <div className="stat-label">Completed</div>
+              <div className="bento-card metric-card">
+                <div className="metric-icon" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8" }}>
+                  ⚡
+                </div>
+                <div className="metric-content">
+                  <span className="metric-label">In Progress</span>
+                  <div className="metric-value">{inProgressCount}</div>
+                  <span className="metric-hint">Work in flight</span>
+                </div>
               </div>
 
-              <div className="bento-card stat-card">
-                <div className="stat-value">{completionPercentage}%</div>
-                <div className="stat-label">Progress</div>
-                <div className="progress-bar-container">
-                  <div
-                    className="progress-bar-fill"
-                    style={{ width: `${completionPercentage}%` }}
-                  />
+              <div className="bento-card metric-card">
+                <div className="metric-icon" style={{ background: "rgba(199, 199, 186, 0.15)", color: "#e8e1dd" }}>
+                  ✓
+                </div>
+                <div className="metric-content">
+                  <span className="metric-label">Done ({completionPercentage}%)</span>
+                  <div className="metric-value">{doneCount}</div>
+                  <span className="metric-hint">Completed items</span>
                 </div>
               </div>
             </div>
 
-            {/* Filter & Controls Bar */}
-            <div className="bento-card todo-controls-card">
-              <div className="search-box">
+            {/* Filter & View Switcher Bar */}
+            <div
+              className="bento-card"
+              style={{
+                marginBottom: "2rem",
+                padding: "1.25rem 1.75rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "1rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "1rem", flex: 1, minWidth: "260px" }}>
                 <input
                   type="text"
-                  className="form-input search-input"
-                  placeholder="Search tasks..."
+                  className="form-input"
+                  placeholder="🔍 Search sticky notes..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ flex: 1, padding: "0.55rem 1rem", fontSize: "0.9rem" }}
                 />
                 {searchTerm && (
                   <button
-                    className="clear-search-btn"
+                    className="btn btn-secondary"
                     onClick={() => setSearchTerm("")}
+                    style={{ padding: "0.5rem 0.85rem", fontSize: "0.8rem" }}
                   >
-                    ✕
+                    Clear
                   </button>
                 )}
               </div>
 
-              <div className="filter-controls">
-                <div className="filter-group">
+              <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+                <select
+                  className="form-input"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  style={{ padding: "0.5rem 0.85rem", fontSize: "0.85rem" }}
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="alphabetical">Alphabetical</option>
+                </select>
+
+                {/* View Switcher Toggle */}
+                <div className="view-toggle-group">
                   <button
-                    className={`filter-btn ${statusFilter === "all" ? "active" : ""}`}
-                    onClick={() => setStatusFilter("all")}
+                    className={`view-toggle-btn ${viewMode === "kanban" ? "active" : ""}`}
+                    onClick={() => setViewMode("kanban")}
+                    title="Physical Kanban Board View"
                   >
-                    All ({totalTasks})
+                    Kanban Board
                   </button>
                   <button
-                    className={`filter-btn ${statusFilter === "pending" ? "active" : ""}`}
-                    onClick={() => setStatusFilter("pending")}
+                    className={`view-toggle-btn ${viewMode === "list" ? "active" : ""}`}
+                    onClick={() => setViewMode("list")}
+                    title="Classic List View"
                   >
-                    Pending ({pendingTasks})
-                  </button>
-                  <button
-                    className={`filter-btn ${statusFilter === "completed" ? "active" : ""}`}
-                    onClick={() => setStatusFilter("completed")}
-                  >
-                    Done ({completedTasks})
+                    ☰ List View
                   </button>
                 </div>
 
-                <div className="sort-group">
-                  <select
-                    className="form-input sort-select"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                  >
-                    <option value="newest">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                    <option value="alphabetical">Alphabetical</option>
-                  </select>
-                </div>
-
-                {completedTasks > 0 && (
+                {doneCount > 0 && (
                   <button
                     onClick={clearCompleted}
-                    className="btn btn-secondary clear-completed-btn"
+                    className="btn btn-secondary"
+                    style={{ padding: "0.45rem 0.85rem", fontSize: "0.8rem", color: "#ffb4ab" }}
                   >
-                    Clear Done ({completedTasks})
+                    Clear Done ({doneCount})
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Task List Rendering */}
-            <div className="task-list-section">
-              {loading ? (
-                <div className="todo-empty-state">
-                  <div className="loading-spinner"></div>
-                  <p>Loading your tasks securely from MongoDB...</p>
-                </div>
-              ) : processedTasks.length === 0 ? (
-                <div className="bento-card todo-empty-state">
-                  <div className="empty-icon">📝</div>
-                  <h3>No tasks found</h3>
-                  <p>
-                    {searchTerm || statusFilter !== "all"
-                      ? "No tasks match your filter criteria."
-                      : "You don't have any tasks yet. Create one above to get started!"}
-                  </p>
-                </div>
-              ) : (
-                <div className="task-items-container">
-                  {processedTasks.map((task) => (
-                    <div
-                      key={task._id}
-                      className={`bento-card task-item ${
-                        task.completed ? "task-completed" : ""
-                      }`}
-                    >
-                      <div className="task-item-left">
-                        <input
-                          type="checkbox"
-                          className="task-checkbox"
-                          checked={task.completed}
-                          onChange={() => toggleTask(task)}
-                          title={
-                            task.completed
-                              ? "Mark as pending"
-                              : "Mark as completed"
-                          }
-                        />
-                        <div className="task-content">
-                          <h4 className="task-title">{task.title}</h4>
-                          {task.description && (
-                            <p className="task-description">{task.description}</p>
-                          )}
-                          <div className="task-meta">
-                            <span
-                              className={`status-pill ${
-                                task.completed ? "pill-done" : "pill-pending"
-                              }`}
-                            >
-                              {task.completed ? "Completed" : "Pending"}
-                            </span>
-                            {task.createdAt && (
-                              <span className="task-date">
-                                Created: {formatDate(task.createdAt)}
-                              </span>
+            {/* MAIN CONTENT: KANBAN BOARD OR LIST */}
+            {loading ? (
+              <div className="bento-card" style={{ padding: "3.5rem", textAlign: "center" }}>
+                <div className="mini-spinner" style={{ width: "24px", height: "24px" }}></div>
+                <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}>
+                  Loading sticky notes onto the whiteboard...
+                </p>
+              </div>
+            ) : viewMode === "kanban" ? (
+              /* =======================================================
+                 PHYSICAL KANBAN BOARD VIEW (Matching User's Drawing)
+                 ======================================================= */
+              <div className="kanban-board-wrapper">
+                <div className="kanban-board-frame">
+                  {/* Physical Board Top Header */}
+                  <div className="kanban-board-header">
+                    <div className="kanban-title-wrap">
+
+                      <div className="kanban-title-underline" />
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                      💡 Drag &amp; drop cards between columns or use arrow buttons
+                    </div>
+                  </div>
+
+                  {/* 3 Columns: To do | In progress | Done */}
+                  <div className="kanban-columns-grid">
+                    {KANBAN_COLUMNS.map((column) => {
+                      const colCards = columnTasks[column.id] || [];
+
+                      return (
+                        <div
+                          key={column.id}
+                          className={`kanban-column ${activeDropCol === column.id ? "drop-zone-active" : ""
+                            }`}
+                          onDragOver={(e) => handleDragOver(e, column.id)}
+                          onDragLeave={(e) => handleDragLeave(e, column.id)}
+                          onDrop={(e) => handleDrop(e, column.id)}
+                        >
+                          {/* Column Header */}
+                          <div className="kanban-column-header">
+                            <h4 className="kanban-column-title">
+                              <span>{column.icon}</span> {column.title}
+                            </h4>
+                            <span className="column-badge">{colCards.length}</span>
+                          </div>
+
+                          {/* Column Cards Container */}
+                          <div className="kanban-column-cards">
+                            {colCards.length === 0 ? (
+                              <div className="kanban-column-empty">
+                                <div>📌 Drop sticky notes here</div>
+                                <div style={{ fontSize: "0.78rem", marginTop: "0.3rem", opacity: 0.7 }}>
+                                  {column.hint}
+                                </div>
+                              </div>
+                            ) : (
+                              colCards.map((task, idx) => {
+                                const palette = getStickyStyle(idx);
+                                const tiltClass = idx % 2 === 0 ? "tilt-left" : "tilt-right";
+
+                                return (
+                                  <div
+                                    key={task._id}
+                                    draggable={true}
+                                    onDragStart={(e) => handleDragStart(e, task._id)}
+                                    className={`sticky-note-card ${tiltClass}`}
+                                    style={{
+                                      borderTop: `5px solid ${palette.borderTop}`,
+                                      backgroundColor: "var(--surface-container)",
+                                    }}
+                                  >
+                                    {/* Top Tape Accent */}
+                                    <div
+                                      className="sticky-tape"
+                                      style={{ backgroundColor: palette.tape }}
+                                    />
+
+                                    <div className="sticky-note-header">
+                                      <h5 className="sticky-note-title">{task.title}</h5>
+                                    </div>
+
+                                    {task.description && (
+                                      <p className="sticky-note-desc">{task.description}</p>
+                                    )}
+
+                                    {/* Card Footer with Quick Move & Actions */}
+                                    <div className="sticky-note-footer">
+                                      <span>{formatDate(task.createdAt)}</span>
+
+                                      {/* Quick Move Buttons */}
+                                      <div className="sticky-move-actions">
+                                        {column.id === "todo" && (
+                                          <button
+                                            className="sticky-move-btn"
+                                            onClick={() => updateTaskStatus(task._id, "in-progress")}
+                                            title="Move to In progress"
+                                          >
+                                            In progress →
+                                          </button>
+                                        )}
+
+                                        {column.id === "in-progress" && (
+                                          <>
+                                            <button
+                                              className="sticky-move-btn"
+                                              onClick={() => updateTaskStatus(task._id, "todo")}
+                                              title="Move back to To do"
+                                            >
+                                              ← To do
+                                            </button>
+                                            <button
+                                              className="sticky-move-btn"
+                                              onClick={() => updateTaskStatus(task._id, "done")}
+                                              title="Move to Done"
+                                            >
+                                              Done →
+                                            </button>
+                                          </>
+                                        )}
+
+                                        {column.id === "done" && (
+                                          <button
+                                            className="sticky-move-btn"
+                                            onClick={() => updateTaskStatus(task._id, "in-progress")}
+                                            title="Move back to In progress"
+                                          >
+                                            ← In prog
+                                          </button>
+                                        )}
+
+                                        <button
+                                          className="sticky-icon-btn"
+                                          onClick={() => setEditingTask(task)}
+                                          title="Edit note"
+                                        >
+                                          ✏️
+                                        </button>
+
+                                        <button
+                                          className="sticky-icon-btn delete-icon"
+                                          onClick={() => deleteTask(task._id)}
+                                          title="Delete note"
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
                             )}
                           </div>
+
+                          {/* Quick Add Button per Column */}
+                          <button
+                            className="kanban-add-card-btn"
+                            onClick={() => {
+                              const quickTitle = window.prompt(`Quick add note to "${column.title}":`);
+                              if (quickTitle && quickTitle.trim().length >= 3) {
+                                setForm({ title: quickTitle.trim(), description: "", status: column.id });
+                                addTask({ preventDefault: () => { } }, column.id);
+                              } else if (quickTitle !== null) {
+                                alert("Note title must be at least 3 characters.");
+                              }
+                            }}
+                          >
+                            + Add note to {column.title}
+                          </button>
                         </div>
-                      </div>
-
-                      <div className="task-actions">
-                        <button
-                          className="edit-btn"
-                          onClick={() => setEditingTask(task)}
-                          title="Edit task"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          className="delete-btn"
-                          onClick={() => deleteTask(task._id)}
-                          title="Delete task"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              /* =======================================================
+                 CLASSIC LIST VIEW
+                 ======================================================= */
+              <div className="task-list-section">
+                {processedTasks.length === 0 ? (
+                  <div className="bento-card" style={{ padding: "3rem", textAlign: "center" }}>
+                    <div className="empty-icon">📝</div>
+                    <h3>No tasks found</h3>
+                    <p style={{ color: "var(--text-muted)" }}>
+                      {searchTerm
+                        ? "No tasks match your filter criteria."
+                        : "You don't have any tasks yet. Pin a sticky note above to get started!"}
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    {processedTasks.map((task) => {
+                      const st = getTaskStatus(task);
+                      return (
+                        <div
+                          key={task._id}
+                          className="task-card"
+                          style={{
+                            borderLeft:
+                              st === "done"
+                                ? "4px solid #c7c7ba"
+                                : st === "in-progress"
+                                  ? "4px solid #38bdf8"
+                                  : "4px solid #f2ca50",
+                          }}
+                        >
+                          <div className="task-main">
+                            <button
+                              className={`task-checkbox ${st === "done" ? "checked" : ""}`}
+                              onClick={() =>
+                                updateTaskStatus(task._id, st === "done" ? "todo" : "done")
+                              }
+                              title={st === "done" ? "Mark incomplete" : "Mark done"}
+                            >
+                              {st === "done" ? "✓" : ""}
+                            </button>
 
-            {/* Edit Task Modal Overlay */}
+                            <div className="task-info">
+                              <h4
+                                style={{
+                                  textDecoration: st === "done" ? "line-through" : "none",
+                                  color: st === "done" ? "var(--text-muted)" : "var(--text-primary)",
+                                }}
+                              >
+                                {task.title}
+                              </h4>
+                              {task.description && <p>{task.description}</p>}
+                              <div className="task-meta">
+                                <span
+                                  className="status-badge"
+                                  style={{
+                                    backgroundColor:
+                                      st === "done"
+                                        ? "rgba(199, 199, 186, 0.14)"
+                                        : st === "in-progress"
+                                          ? "rgba(56, 189, 248, 0.15)"
+                                          : "rgba(242, 202, 80, 0.12)",
+                                    color:
+                                      st === "done"
+                                        ? "#c7c7ba"
+                                        : st === "in-progress"
+                                          ? "#38bdf8"
+                                          : "#f2ca50",
+                                  }}
+                                >
+                                  {st === "todo" ? "To do" : st === "in-progress" ? "In progress" : "Done"}
+                                </span>
+                                {task.createdAt && <span>Created: {formatDate(task.createdAt)}</span>}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="task-actions">
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => setEditingTask(task)}
+                              style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="delete-btn"
+                              onClick={() => deleteTask(task._id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Edit Task Modal */}
             {editingTask && (
               <div className="modal-backdrop" onClick={() => setEditingTask(null)}>
-                <div
-                  className="edit-modal"
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <div className="edit-modal" onClick={(e) => e.stopPropagation()}>
                   <div className="edit-modal-header">
-                    <h3>Edit Task</h3>
-                    <button
-                      className="modal-close-btn"
-                      onClick={() => setEditingTask(null)}
-                    >
+                    <h3>Edit Sticky Note</h3>
+                    <button className="modal-close-btn" onClick={() => setEditingTask(null)}>
                       ✕
                     </button>
                   </div>
 
                   <form onSubmit={saveEditedTask}>
                     <div className="form-group">
-                      <label className="form-label">Task Title (Min 3 chars)</label>
+                      <label className="form-label">Note Title (Min 3 characters)</label>
                       <input
                         className="form-input"
                         type="text"
@@ -983,7 +1142,7 @@ function Todo() {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Description</label>
+                      <label className="form-label">Description / Details</label>
                       <textarea
                         className="form-textarea"
                         rows="3"
@@ -998,19 +1157,21 @@ function Todo() {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Status</label>
+                      <label className="form-label">Board Column Status</label>
                       <select
                         className="form-input"
-                        value={editingTask.completed ? "completed" : "pending"}
+                        value={editingTask.status || (editingTask.completed ? "done" : "todo")}
                         onChange={(e) =>
                           setEditingTask({
                             ...editingTask,
-                            completed: e.target.value === "completed",
+                            status: e.target.value,
+                            completed: e.target.value === "done",
                           })
                         }
                       >
-                        <option value="pending">Pending</option>
-                        <option value="completed">Completed</option>
+                        <option value="todo">To do</option>
+                        <option value="in-progress">In progress</option>
+                        <option value="done">Done</option>
                       </select>
                     </div>
 

@@ -57,4 +57,19 @@ describe("Practical 12: CI/CD Automated API Test Suite", () => {
     expect(res.body.success).toBe(true);
     expect(Array.isArray(res.body.data)).toBe(true);
   });
+
+  // Test 5: AI Description Generator with Graceful Degradation (Practical 13)
+  test("POST /api/ai/generate-description returns status 200 with actionable draft", async () => {
+    const res = await request(app)
+      .post("/api/ai/generate-description")
+      .set("Authorization", `Bearer ${testToken}`)
+      .send({ title: "Implement Automated Testing Pipeline" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body).toHaveProperty("description");
+    expect(typeof res.body.description).toBe("string");
+    expect(res.body.description.length).toBeGreaterThan(10);
+    expect(res.body).toHaveProperty("disclaimer");
+  });
 });

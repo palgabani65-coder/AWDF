@@ -418,6 +418,138 @@ app.post("/cache/clear", (req, res) => {
 });
 
 // ==========================================
+// AI ASSISTANT API ROUTE (Practical 13)
+// ==========================================
+// Rate limiting map: tracks timestamp of last AI generation per user (Supplementary Problem 2)
+const aiRateLimits = new Map();
+
+app.post("/api/ai/generate-description", auth, async (req, res) => {
+    try {
+        const { title } = req.body;
+        if (!title || typeof title !== "string" || title.trim().length < 3) {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide a valid task title with at least 3 characters."
+            });
+        }
+
+        const trimmedTitle = title.trim();
+        const userId = req.user ? req.user.id : "anonymous";
+        const now = Date.now();
+
+        // Rate limit: 1 request every 5 seconds per user
+        const lastRequestTime = aiRateLimits.get(userId) || 0;
+        if (now - lastRequestTime < 5000) {
+            const waitSeconds = Math.ceil((5000 - (now - lastRequestTime)) / 1000);
+            return res.status(429).json({
+                success: false,
+                message: `AI rate limit: Please wait ${waitSeconds}s before generating another suggestion.`
+            });
+        }
+        aiRateLimits.set(userId, now);
+
+        let aiDescription = null;
+        let aiProvider = "fallback";
+
+        // 1. Try OpenAI API if key is present
+        if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith("sk-")) {
+            try {
+                const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: "gpt-4o-mini",
+                        messages: [
+                            {
+                                role: "system",
+                                content: "You are a concise productivity assistant. Write a short, actionable, 1-2 sentence description for the given task title. Do not include markdown headers or bullet points."
+                            },
+                            {
+                                role: "user",
+                                content: `Write a short task description for: "${trimmedTitle}"`
+                            }
+                        ],
+                        max_tokens: 120,
+                        temperature: 0.7
+                    }),
+                    signal: AbortSignal.timeout(8000)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.choices && data.choices[0] && data.choices[0].message) {
+                        aiDescription = data.choices[0].message.content.trim();
+                        aiProvider = "openai";
+                    }
+                }
+            } catch (openAiErr) {
+                console.warn("[AI Service] OpenAI request failed/timed out:", openAiErr.message);
+            }
+        }
+
+        // 2. Try Gemini API if key is present and OpenAI wasn't used
+        if (!aiDescription && process.env.GEMINI_API_KEY) {
+            try {
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+                const response = await fetch(geminiUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [
+                            {
+                                parts: [
+                                    {
+                                        text: `Write a concise 1-2 sentence actionable task description for the task titled: "${trimmedTitle}". Be direct without conversational filler.`
+                                    }
+                                ]
+                            }
+                        ]
+                    }),
+                    signal: AbortSignal.timeout(8000)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        aiDescription = text.trim();
+                        aiProvider = "gemini";
+                    }
+                }
+            } catch (geminiErr) {
+                console.warn("[AI Service] Gemini request failed/timed out:", geminiErr.message);
+            }
+        }
+
+        // 3. Graceful Degradation Fallback (if API keys missing, quota exceeded, or network down)
+        if (!aiDescription) {
+            aiDescription = `Action plan for '${trimmedTitle}': Define scope and acceptance criteria, allocate necessary resources, and track progress through to completion.`;
+            aiProvider = "graceful_fallback";
+        }
+
+        return res.status(200).json({
+            success: true,
+            description: aiDescription,
+            provider: aiProvider,
+            fallback: aiProvider === "graceful_fallback",
+            disclaimer: "AI-generated suggestion. Please review and edit before saving."
+        });
+    } catch (err) {
+        console.error("[AI Service Error]:", err);
+        return res.status(200).json({
+            success: true,
+            description: `Draft description for "${req.body.title || 'Task'}": Review specifications, execute planned steps, and verify outcomes.`,
+            provider: "error_fallback",
+            fallback: true,
+            disclaimer: "AI service currently offline. Showing fallback draft."
+        });
+    }
+});
+
+// ==========================================
 // ADMIN REPORT GENERATION ROUTE (Date-Range & Aggregations)
 // ==========================================
 app.get("/admin/reports", auth, requireAdmin, async (req, res, next) => {
