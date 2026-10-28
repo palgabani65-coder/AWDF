@@ -55,6 +55,15 @@ mongoose
     .then(() => console.log(`MongoDB Connected: ${MONGO_URI}`))
     .catch((err) => console.error("MongoDB Connection Error:", err));
 
+// GET / - Root Health Check (Practical 12: Automated CI/CD Sanity Check)
+app.get("/", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "Task Management API is running",
+        timestamp: new Date().toISOString()
+    });
+});
+
 // ==========================================
 // AUTHENTICATION ROUTES (Practical 7)
 // ==========================================
@@ -672,7 +681,11 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// Start server (only if not running under Jest test runner)
+if (process.env.NODE_ENV !== "test") {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+module.exports = app;
